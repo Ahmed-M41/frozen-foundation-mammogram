@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+cache/
+patch_cache/
+output/
+.claude/
+*.db
+*.log
+C:UserspcAppDataLocalTempclaude*
+paper_ieee_access/
+ENSEMBLER_B.md
+*.zip
+*.zip.bak
