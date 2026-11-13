@@ -64,12 +64,12 @@ def _frozen_feats(conn):
     return {int(i): X[k] for k, i in enumerate(ids0)}
 
 
-def head_full4(conn, fold_of, info, frozen, C, view_filter=None):
+def head_full4(conn, fold_of, info, frozen, C, view_filter=None, mc_fmt="mammo_clip_b5_ft_fold{V}"):
     """Fold-matched: fine-tuned Mammo-CLIP (per fold) concatenated with the three
     frozen encoders, classifier refit per fold. Returns (oof_map, test_map)."""
     oof, test_scores = {}, {}
     for V in range(N_SPLITS):
-        name = f"mammo_clip_b5_ft_fold{V}"
+        name = mc_fmt.format(V=V)   # "mammo_clip_b5" = frozen control on identical folds
         ids, X_mc, _ = db.load_embeddings(conn, name, dataset=DATASET)
         X_mc = _l2(X_mc)
         X = np.concatenate([X_mc, np.stack([frozen[int(i)] for i in ids])], axis=1)
@@ -114,15 +114,15 @@ def _branches(ids_subset, cc_ids, mlo_ids, all_map, cc_map, mlo_map):
     return br
 
 
-def run(C=0.05):
+def run(C=0.5, mc_fmt="mammo_clip_b5_ft_fold{V}", label="FineTuned-MammoCLIP + 3 frozen"):
     conn = db.connect()
     fold_of = _load_fold_of()
     info = _meta(conn)
     frozen = _frozen_feats(conn)
 
-    oof_all, te_all = head_full4(conn, fold_of, info, frozen, C, view_filter=None)
-    oof_cc, te_cc = head_full4(conn, fold_of, info, frozen, C, view_filter="CC")
-    oof_mlo, te_mlo = head_full4(conn, fold_of, info, frozen, C, view_filter="MLO")
+    oof_all, te_all = head_full4(conn, fold_of, info, frozen, C, view_filter=None, mc_fmt=mc_fmt)
+    oof_cc, te_cc = head_full4(conn, fold_of, info, frozen, C, view_filter="CC", mc_fmt=mc_fmt)
+    oof_mlo, te_mlo = head_full4(conn, fold_of, info, frozen, C, view_filter="MLO", mc_fmt=mc_fmt)
 
     tr_ids = np.array([i for i, m in info.items() if m["split"] == "train"])
     te_ids = np.array([i for i, m in info.items() if m["split"] == "test"])
@@ -133,7 +133,7 @@ def run(C=0.05):
 
     thr_branches = _branches(tr_ids, cc_tr, mlo_tr, oof_all, oof_cc, oof_mlo)
     thr_cf = evaluate.case_fuse(conn, thr_branches, method="mean")
-    thr = _best_threshold(thr_cf["y_true"], thr_cf["y_score"])
+    thr = config.DECISION_THRESHOLD   # fixed 0.5, untuned (revision 2026-11-13)
     cv_auc = roc_auc_score(thr_cf["y_true"], thr_cf["y_score"])
 
     te_branches = _branches(te_ids, cc_te, mlo_te, te_all, te_cc, te_mlo)
@@ -143,7 +143,7 @@ def run(C=0.05):
     pm = _metrics(y_te[pidx], s_te[pidx], thr)
     run.last_cf = cf
 
-    print(f"  FineTuned-MammoCLIP + 3 frozen (full pipeline) C={C} thr={thr:.3f} "
+    print(f"  {label} (full pipeline) C={C} thr={thr:.3f} "
           f"TRAIN-CV-case-AUC={cv_auc:.4f}")
     print(f"    FULL({len(y_te)}):   acc={full['accuracy']:.4f} bal_acc={full['bal_acc']:.4f} "
           f"auc={full['auc']:.4f} sens={full['sensitivity']:.4f} spec={full['specificity']:.4f}")
@@ -153,9 +153,9 @@ def run(C=0.05):
 
 
 if __name__ == "__main__":
-    print("=== FROZEN (all four, existing headline) ===")
-    run_frozen(["mammo_clip_b5", "dinov2_vitl14_r518_noclahe", "rad_dino_noclahe",
-                "mammoscreen_feat"], dataset=DATASET, mode="fourway", C=0.05)
-
+    # FIX 2026-11-12: C=0.5 (the headline setting; submitted table used 0.05), and the
+    # Frozen row goes through the IDENTICAL fold file and code path as the fine-tuned row.
+    print("=== FROZEN (all four, same folds + code path) ===")
+    run(C=0.5, mc_fmt="mammo_clip_b5", label="Frozen 4")
     print("\n=== FINE-TUNED MAMMO-CLIP + 3 FROZEN (full pipeline) ===")
-    run(C=0.05)
+    run(C=0.5)

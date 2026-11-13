@@ -29,7 +29,7 @@ METHOD = "base4"          # the paper's method: BASE4 early feature-fusion
 # Single representative-seed confusion counts (scanner_confound_check-style honest
 # single-evaluation numbers, NOT summed over the four seeds like NUM's tn/fp/fn/tp,
 # so the figure's total matches a real evaluated case count).
-CM_SINGLE = json.load(open(os.path.join(config.PROJECT_DIR, "cache", "confusion_singleseed.json")))
+CM_SINGLE = json.load(open(os.path.join(config.PROJECT_DIR, "cache", "confusion_singleseed_v3.json")))
 
 
 def _ortho(ax, pts, c="#555", arrow=True, lw=1.6, z=3, ms=13):
@@ -468,7 +468,7 @@ if __name__ == "__main__":
     pipeline_diagram()
     sample_panel()
     # BASE4 database-scaling curves (base4_scaling.py). 10-100% = target pool; 110-200% = + MIAS.
-    cbp = os.path.join(config.PROJECT_DIR, "cache", "base4_scaling_cbis.csv")
+    cbp = os.path.join(config.PROJECT_DIR, "cache", "base4_scaling_cbis_v3.csv")
     if os.path.exists(cbp):
         curve_from_csv(cbp,
                        "CBIS-DDSM performance as the labelled database grows\n"
@@ -477,7 +477,7 @@ if __name__ == "__main__":
                        vline=None)
     else:
         print("[pending] CBIS BASE4 scaling CSV not ready yet:", cbp)
-    ncp = os.path.join(config.PROJECT_DIR, "cache", "base4_scaling_mini.csv")
+    ncp = os.path.join(config.PROJECT_DIR, "cache", "base4_scaling_mini_v3.csv")
     if os.path.exists(ncp):
         curve_from_csv(ncp,
                        "Mini-DDSM normal/cancer as the labelled database grows\n"

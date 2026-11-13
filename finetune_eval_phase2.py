@@ -115,7 +115,7 @@ def _branches(ids_subset, cc_ids, mlo_ids, all_map, cc_map, mlo_map):
     ]
 
 
-def run(C=0.05):
+def run(C=0.5):
     conn = db.connect()
     fold_of = _load_fold_of()
     info = _meta(conn)
@@ -134,7 +134,7 @@ def run(C=0.05):
 
     thr_branches = _branches(tr_ids, cc_tr, mlo_tr, oof_all, oof_cc, oof_mlo)
     thr_cf = evaluate.case_fuse(conn, thr_branches, method="mean")
-    thr = _best_threshold(thr_cf["y_true"], thr_cf["y_score"])
+    thr = config.DECISION_THRESHOLD   # fixed 0.5, untuned (revision 2026-11-13)
     cv_auc = roc_auc_score(thr_cf["y_true"], thr_cf["y_score"])
 
     te_branches = _branches(te_ids, cc_te, mlo_te, te_all, te_cc, te_mlo)
@@ -169,12 +169,10 @@ def print_cost():
 
 
 if __name__ == "__main__":
-    print("=== FROZEN (all four, existing headline) ===")
-    run_frozen(["mammo_clip_b5", "dinov2_vitl14_r518_noclahe", "rad_dino_noclahe",
-                "mammoscreen_feat"], dataset=DATASET, mode="fourway", C=0.05)
-
-    print("\n=== PHASE 2: 3 fine-tuned encoders + 1 frozen (MammoScreen) ===")
-    run(C=0.05)
+    # FIX 2026-11-12: C=0.5 (headline setting; submitted table used 0.05). The Frozen
+    # comparison row now comes from finetune_eval_full4.py (identical folds + code path).
+    print("=== PHASE 2: 3 fine-tuned encoders + 1 frozen (MammoScreen) ===")
+    run(C=0.5)
 
     print("\n=== COST ===")
     print_cost()

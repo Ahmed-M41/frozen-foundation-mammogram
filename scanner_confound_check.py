@@ -27,6 +27,7 @@ Run: python scanner_confound_check.py
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
+import config
 import db
 import evaluate
 import miniddsm_B as M
@@ -41,25 +42,31 @@ def _prefix(grp):
     return np.array([g.split("_")[0] for g in grp])
 
 
-def diag_scanner_predict(ids, X, grp, view, prefix):
+def diag_scanner_predict(ids, X, grp, view, prefix, y_nc):
     """Can BASE3 features tell prefix A from prefix D (both real scanners, both
-    containing genuine normal AND cancer cases -- so this isolates scanner
-    signature from the normal/cancer label itself)?"""
-    keep = np.isin(prefix, ["A", "D"])
-    ids, X, grp, view = ids[keep], X[keep], grp[keep], view[keep]
-    y = (prefix[keep] == "A").astype(int)     # 1 = prefix A, 0 = prefix D
+    containing genuine normal AND cancer cases)?
 
-    aucs = []
-    for seed in SEEDS:
-        te_mask = M.patient_test_mask(grp, y, 0.2, seed)
-        tr_mask = ~te_mask
-        tr_cf, te_cf = head_case_scores(db.connect(), ids, X, y, grp, view,
-                                         tr_mask, te_mask, C_HEAD, seed)
-        aucs.append(roc_auc_score(te_cf["y_true"], te_cf["y_score"]))
-    print(f"  scanner (prefix A vs D) predictability from BASE3 features: "
-          f"AUC={np.mean(aucs):.4f} +- {np.std(aucs):.4f} over {len(SEEDS)} seeds "
-          f"(n={len(ids)} images) -- near 1.0 means the representation trivially "
-          f"encodes acquisition signature")
+    FIX (2026-11-12): the submitted version scored this AUC against the cancer/normal
+    label (te_cf["y_true"] from evaluate.case_fuse reads binary_label from the DB),
+    not against the site label it was trained on. Now: image-level, patient-grouped
+    linear probe trained AND scored on site labels. Also run within each class, so the
+    cancer/normal label cannot drive the site prediction."""
+    import multiview_probe as MV
+    res = {}
+    for name, cls in (("all", None), ("normal only", 0), ("cancer only", 1)):
+        keep = np.isin(prefix, ["A", "D"]) & (True if cls is None else (y_nc == cls))
+        Xs, gs = X[keep], grp[keep]
+        ysite = (prefix[keep] == "A").astype(int)    # 1 = prefix A, 0 = prefix D
+        aucs = []
+        for seed in SEEDS:
+            te = M.patient_test_mask(gs, ysite, 0.2, seed)
+            _, s_te = MV.head_cv(Xs[~te], ysite[~te], gs[~te], Xs[te], C_HEAD, seed=seed)
+            aucs.append(roc_auc_score(ysite[te], s_te))
+        res[name] = (float(np.mean(aucs)), float(np.std(aucs)), int(keep.sum()))
+        print(f"  site A vs D from BASE3 features [{name:11s}]: AUC={np.mean(aucs):.4f} "
+              f"+- {np.std(aucs):.4f} over {len(SEEDS)} seeds (n={int(keep.sum())} images; "
+              f"A={int(ysite.sum())}, D={int((1 - ysite).sum())})")
+    return res
 
 
 def diag_single_scanner_nc(ids, X, y, grp, view, prefix):
@@ -79,7 +86,7 @@ def diag_single_scanner_nc(ids, X, y, grp, view, prefix):
         tr_mask = ~te_mask
         tr_cf, te_cf = head_case_scores(conn, ids, X, y, grp, view, tr_mask, te_mask,
                                          C_HEAD, seed)
-        thr = _best_threshold(tr_cf["y_true"], tr_cf["y_score"])
+        thr = config.DECISION_THRESHOLD   # fixed 0.5, untuned (revision 2026-11-13)
         m = _metrics(te_cf["y_true"], te_cf["y_score"], thr)
         aucs.append(roc_auc_score(te_cf["y_true"], te_cf["y_score"]))
         accs.append(m["accuracy"]); bals.append(m["bal_acc"])
@@ -102,7 +109,7 @@ def main():
         print(f"  {p}: cancer={int((y[m] == 1).sum()):4d}  normal={int((y[m] == 0).sum()):4d}")
 
     print("\n=== diagnostic 1: scanner predictability (prefix A vs D) ===")
-    diag_scanner_predict(ids, X, grp, view, prefix)
+    diag_scanner_predict(ids, X, grp, view, prefix, y)
 
     print("\n=== diagnostic 2: single-scanner (prefix A only) normal-vs-cancer ===")
     diag_single_scanner_nc(ids, X, y, grp, view, prefix)

@@ -14,7 +14,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
-import db, evaluate
+import json, os
+
+import config, db, evaluate
 import miniddsm_B as M
 from mil import _best_threshold, _metrics
 from exp_msfeat_fusion import load_enc, BASE3, MSFEAT, cbis_ms
@@ -63,7 +65,7 @@ def eval_cfg(conn, ids, X, y, grp, view, tr, te, C, cw):
         pidx = np.array(tecf["paired_idx"], dtype=int)
         yte, Rte = yte[pidx], Rte[pidx]
         tr_oof_auc.append(roc_auc_score(ytr, Rtr))
-        thr = _best_threshold(yte, Rte)
+        thr = config.DECISION_THRESHOLD       # fixed 0.5, untuned (revision 2026-11-13)
         m = _metrics(yte, Rte, thr)
         te_auc.append(roc_auc_score(yte, Rte)); te_acc.append(m["accuracy"]); te_bal.append(m["bal_acc"])
     return (np.mean(tr_oof_auc), np.mean(te_auc), np.std(te_auc),
@@ -73,7 +75,7 @@ def eval_cfg(conn, ids, X, y, grp, view, tr, te, C, cw):
 def main():
     conn = db.connect()
     ids, X, y0, split, grp, view, ds, patho, abn = load_enc(conn, ["cbis_full"], ENC4)
-    y = np.isin(patho, ["MALIGNANT", "CANCER"]).astype(int)
+    y = y0   # FIX 2026-11-12: DB binary_label (first-pathology relabel disagreed on 1 test image)
     tr, te = split == "train", split == "test"
 
     print("=== (a) current config C=0.5 balanced: per-seed spread ===")
@@ -85,10 +87,13 @@ def main():
 
     print("\n=== (b) regularisation C sweep (select by TRAIN-OOF AUC) | balanced ===")
     print(f"    {'C':>6} {'TRAIN-OOF AUC':>14} {'TEST AUC':>16} {'acc':>6} {'bal':>6}")
-    best = None
-    for C in [0.05, 0.1, 0.2, 0.5, 1.0, 2.0]:
+    best, sweep = None, []
+    for C in [0.001, 0.005, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0]:
         r = eval_cfg(conn, ids, X, y, grp, view, tr, te, C, "balanced")
-        print(f"    {C:6.2f} {r[0]:14.4f} {r[1]:10.4f}+-{r[2]:.3f} {r[3]*100:5.1f}% {r[4]*100:5.1f}%")
+        print(f"    {C:6.3f} {r[0]:14.4f} {r[1]:10.4f}+-{r[2]:.3f} {r[3]*100:5.1f}% {r[4]*100:5.1f}%", flush=True)
+        sweep.append(dict(C=C, train_oof_auc=float(r[0]), test_auc=float(r[1]), test_auc_sd=float(r[2]),
+                          test_acc=float(r[3]), test_bal=float(r[4])))
+        json.dump(sweep, open(os.path.join(config.PROJECT_DIR, "cache", "c_sweep_v3.json"), "w"), indent=2)
         if best is None or r[0] > best[0]:
             best = (r[0], C, r)
     print(f"    honest pick by TRAIN-OOF AUC: C={best[1]} -> "

@@ -48,7 +48,7 @@ def subsample(grp, y, pool, frac, seed):
 def probe_metrics(conn, ids, X, y, grp, view, tr, te, ms_map, seed):
     rcf_tr, rcf_te = head_case_scores(conn, ids, X, y, grp, view, tr, te, M.C_HEAD, seed)
     ytr, Rtr, _, yte, Rte, _ = align_B(rcf_tr, rcf_te, ms_map, ms_map)
-    thr = _best_threshold(yte, Rte)            # Youden
+    thr = config.DECISION_THRESHOLD            # fixed 0.5, untuned (revision 2026-11-13)
     m = _metrics(yte, Rte, thr)
     return roc_auc_score(yte, Rte), m["accuracy"], m["bal_acc"]
 
@@ -69,7 +69,7 @@ def trace(conn, tag, ids, X, y, grp, view, pool_base, extra_pool, te, ms_map):
         print(f"[{tag}] pt={pt:3d} n~{int(np.mean([r['n_img'] for r in last])):4d} "
               f"AUC={np.mean([r['auc'] for r in last]):.4f} "
               f"bal={np.mean([r['bal'] for r in last]):.4f}", flush=True)
-    path = os.path.join(config.PROJECT_DIR, "cache", f"base4_scaling_{tag}.csv")
+    path = os.path.join(config.PROJECT_DIR, "cache", f"base4_scaling_{tag}_v3.csv")  # v1 submitted, v2 train-Youden, v3 fixed 0.5
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader(); w.writerows(rows)
@@ -81,7 +81,7 @@ def main():
 
     # ---- CBIS-DDSM benign/malignant ----
     ids, X, y0, split, grp, view, ds, patho, abn = load_enc(conn, ["cbis_full"], ENC4)
-    y = np.isin(patho, POS).astype(int)
+    y = y0          # DB binary_label (image malignant if ANY abnormality is), same as headline
     pool_base = (ds == "cbis_full") & (split == "train")
     te = (ds == "cbis_full") & (split == "test")
     trace(conn, "cbis", ids, X, y, grp, view, pool_base, np.zeros_like(pool_base), te, cbis_ms())

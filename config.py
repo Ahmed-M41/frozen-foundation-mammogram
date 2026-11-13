@@ -58,4 +58,9 @@ DEFAULT_K = 25
 DEFAULT_DISTANCE = "cosine"
 DEFAULT_HEAD = "tip"
 
+# Operating point for every reported accuracy/sensitivity/specificity (revision
+# 2026-11-13): fixed, untuned 0.5 on the class-balanced logistic probability. Chosen over
+# five training-derived rules by a training-only inner check (threshold_rules.py).
+DECISION_THRESHOLD = 0.5
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)

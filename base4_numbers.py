@@ -31,6 +31,7 @@ from exp_msfeat_fusion import load_enc, BASE3, MSFEAT, cbis_ms
 W = 0.6
 SEEDS = [0, 1, 2, 3]
 CFG_ORDER = ["zero_shot", "probe3", "late3", "base4"]
+FULL_CFGS = ["probe3", "base4"]
 
 
 def _scores(kind, Rtr, Mtr, Rte, Mte):
@@ -46,16 +47,27 @@ def _scores(kind, Rtr, Mtr, Rte, Mte):
 
 
 def _one_config(ytr, str_, yte, ste):
-    """Metrics for one config on one seed: AUC + Youden(test) acc/bal/sens/spec/cm + train-thr bal."""
+    """Metrics for one config on one seed.
+
+    REPORTED operating point: Youden threshold chosen on the pooled out-of-fold TRAINING
+    case scores only, applied unchanged to test (the protocol stated in the paper).
+    The test-chosen threshold is kept ONLY as `*_testthr` fields, to document the
+    correction against the submitted version; it must never be reported as a result.
+    """
     auc = roc_auc_score(yte, ste)
-    thr_y = _best_threshold(yte, ste)         # ROC-optimal (Youden) on test
-    my = _metrics(yte, ste, thr_y)
-    thr_t = _best_threshold(ytr, str_)        # honest threshold on train
-    mt = _metrics(yte, ste, thr_t)
-    return dict(auc=auc, acc=my["accuracy"], bal_acc=my["bal_acc"],
-                sens=my["sensitivity"], spec=my["specificity"],
-                tn=my["tn"], fp=my["fp"], fn=my["fn"], tp=my["tp"],
-                bal_train=mt["bal_acc"], acc_train=mt["accuracy"])
+    thr = config.DECISION_THRESHOLD           # fixed 0.5, untuned (revision)
+    m_yd = _metrics(yte, ste, _best_threshold(ytr, str_))  # v2: train-OOF Youden, for the record
+    m = _metrics(yte, ste, thr)
+    tp, fp, fn = m["tp"], m["fp"], m["fn"]
+    prec = tp / (tp + fp) if tp + fp else 0.0
+    f1 = 2 * tp / (2 * tp + fp + fn) if tp else 0.0
+    m_or = _metrics(yte, ste, _best_threshold(yte, ste))   # submitted-version (test-picked)
+    return dict(auc=auc, acc=m["accuracy"], bal_acc=m["bal_acc"],
+                sens=m["sensitivity"], spec=m["specificity"], prec=prec, f1=f1,
+                tn=m["tn"], fp=fp, fn=fn, tp=tp, thr=thr,
+                acc_testthr=m_or["accuracy"], bal_testthr=m_or["bal_acc"],
+                sens_testthr=m_or["sensitivity"], spec_testthr=m_or["specificity"],
+                acc_youden=m_yd["accuracy"], bal_youden=m_yd["bal_acc"])
 
 
 def run_dataset(conn, label, datasets, task, split_fn, ms_map, apply_nc=False):
@@ -73,6 +85,7 @@ def run_dataset(conn, label, datasets, task, split_fn, ms_map, apply_nc=False):
         assert np.array_equal(ids, raw4[0]), "BASE3/BASE4 row mismatch"
 
     per = {c: [] for c in CFG_ORDER}
+    per_full = {c: [] for c in FULL_CFGS}    # all test cases incl. single-view (no MS score needed)
     for seed in SEEDS:
         tr, te = split_fn(seed, split, grp, y)
         # BASE3 case scores
@@ -90,25 +103,38 @@ def run_dataset(conn, label, datasets, task, split_fn, ms_map, apply_nc=False):
         strain["base4"], stest["base4"] = _scores("probe", R4tr, Mtr, R4te, Mte)
         for c in CFG_ORDER:
             per[c].append(_one_config(ytr, strain[c], yte, stest[c]))
+        # full test population (every case, single-view included): probe configs only
+        for c, (cf_tr, cf_te) in (("probe3", (rcf_tr3, rcf_te3)), ("base4", (rcf_tr4, rcf_te4))):
+            per_full[c].append(_one_config(np.array(cf_tr["y_true"]), np.array(cf_tr["y_score"]),
+                                           np.array(cf_te["y_true"]), np.array(cf_te["y_score"])))
 
-    out = {}
-    for c in CFG_ORDER:
-        rows = per[c]
-        agg = {k: float(np.mean([r[k] for r in rows]))
-               for k in ("auc", "acc", "bal_acc", "sens", "spec", "bal_train", "acc_train")}
+    def _agg(rows):
+        keys = ("auc", "acc", "bal_acc", "sens", "spec", "prec", "f1", "thr",
+                "acc_testthr", "bal_testthr", "sens_testthr", "spec_testthr",
+                "acc_youden", "bal_youden")
+        agg = {k: float(np.mean([r[k] for r in rows])) for k in keys}
         agg["std"] = {k: float(np.std([r[k] for r in rows]))
-                      for k in ("auc", "acc", "bal_acc")}
+                      for k in ("auc", "acc", "bal_acc", "sens", "spec", "prec", "f1")}
         for cc in ("tn", "fp", "fn", "tp"):
             agg[cc] = int(np.sum([r[cc] for r in rows]))
-        out[c] = agg
+        agg["per_seed"] = [{k: (float(r[k]) if not isinstance(r[k], (int, np.integer)) else int(r[k]))
+                            for k in ("auc", "acc", "bal_acc", "sens", "spec", "tn", "fp", "fn", "tp")}
+                           for r in rows]
+        agg["n_test_cases"] = int(np.mean([r["tn"] + r["fp"] + r["fn"] + r["tp"] for r in rows]))
+        return agg
+
+    out = {"paired": {c: _agg(per[c]) for c in CFG_ORDER},
+           "full": {c: _agg(per_full[c]) for c in FULL_CFGS}}
 
     print(f"\n=== {label} ===  (X3={X3.shape[1]}d  X4={X4.shape[1]}d  {len(SEEDS)} seeds)")
-    print(f"    {'config':10s} {'AUC':>16s}  {'acc':>6s} {'bal':>6s} {'sens':>6s} {'spec':>6s} {'bal(tr)':>7s}")
-    for c in CFG_ORDER:
-        a = out[c]
-        print(f"    {c:10s} {a['auc']:.4f}+-{a['std']['auc']:.4f}  "
-              f"{a['acc']*100:5.1f}% {a['bal_acc']*100:5.1f}% "
-              f"{a['sens']*100:5.1f}% {a['spec']*100:5.1f}% {a['bal_train']*100:6.1f}%")
+    print("    fixed 0.5 threshold (REPORTED) | [submitted: test-picked threshold]")
+    for pop in ("full", "paired"):
+        for c, a in out[pop].items():
+            print(f"    {pop:6s} {c:10s} n={a['n_test_cases']:4d} AUC {a['auc']:.4f}+-{a['std']['auc']:.4f} "
+                  f"acc {a['acc']*100:5.1f} bal {a['bal_acc']*100:5.1f} sens {a['sens']*100:5.1f} "
+                  f"spec {a['spec']*100:5.1f} prec {a['prec']*100:5.1f} F1 {a['f1']*100:5.1f} | "
+                  f"[acc {a['acc_testthr']*100:5.1f} bal {a['bal_testthr']*100:5.1f} "
+                  f"sens {a['sens_testthr']*100:5.1f} spec {a['spec_testthr']*100:5.1f}]")
     return out
 
 
@@ -128,7 +154,8 @@ def main():
                                      M.patient_test_mask(grp, y, 0.2, seed)),
         M.load_ms(["miniddsm", "miniddsm_normal"]), apply_nc=True)
 
-    path = os.path.join(config.PROJECT_DIR, "cache", "base4_numbers.json")
+    # v1 (cache/base4_numbers.json) is kept: it holds the submitted test-threshold numbers
+    path = os.path.join(config.PROJECT_DIR, "cache", "base4_numbers_v3.json")
     with open(path, "w") as f:
         json.dump(result, f, indent=2)
     print(f"\nsaved {path}")
