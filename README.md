@@ -10,12 +10,19 @@ concatenated frozen features is fitted.
 
 ## Data
 
-Experiments use the public CBIS-DDSM (official patient-disjoint split) and
-Mini-DDSM datasets. Neither dataset is redistributed in this repository; see the
-original sources:
+Experiments use four public datasets: CBIS-DDSM (official patient-disjoint split) and
+Mini-DDSM (digitised film, main experiments), INbreast (full-field digital, transfer test)
+and a subset of the RSNA Screening Mammography data (digital, training only). None is
+redistributed in this repository; see the original sources:
 
 - CBIS-DDSM: https://www.cancerimagingarchive.net/collection/cbis-ddsm/
 - Mini-DDSM: https://www.kaggle.com/datasets/cheddad/miniddsm2
+- INbreast (public copy): https://www.kaggle.com/datasets/ramanathansp20/inbreast-dataset
+- RSNA: https://www.kaggle.com/competitions/rsna-breast-cancer-detection
+
+Mini-DDSM patients whose films also appear in CBIS-DDSM are excluded
+(`MINI_EXCLUDE_SHARED_FILMS` in `config.py`; duplicates found by `duplicate_search.py`,
+`duplicate_verify.py` and `duplicate_orb.py`).
 
 ## Key scripts
 
@@ -26,6 +33,11 @@ original sources:
 - `finetune_eval*.py`, `finetune_vit.py`, `finetune_mammo_clip.py` — the fine-tuned-backbone comparison
 - `scanner_confound_check.py` — site-shortcut check on Mini-DDSM
 - `paper_figures.py`, `paper_numbers.py` — figure and numbers generation for the paper
+- `finetune_lora.py`, `finetune_resnet50_e2e.py` (+ `*_eval.py`) — LoRA and end-to-end ResNet-50 controls
+- `ablation_e1.py`, `clean_ablation.py`, `components_ci.py` — ablation and fusion comparisons
+- `encoder_eval.py`, `mammofm_combos2.py` — further frozen encoders and the Mammo-FM variant
+- `inbreast_*.py`, `prep_rsna.py`, `rsna_train_eval.py` — transfer to full-field digital mammography
+- `full_metrics_s8.py`, `high_sensitivity_points.py` — full metrics, confusion counts, high-sensitivity operating points
 
 ## Reproducibility
 
@@ -33,8 +45,10 @@ original sources:
 
 ```
 python make_paper_numbers.py --list   # the steps and which table/figure each produces
-python make_paper_numbers.py          # all CPU steps (about 20 minutes)
-python make_paper_numbers.py --gpu    # also the occlusion maps (needs a GPU)
+python make_paper_numbers.py          # all CPU steps
+python make_paper_numbers.py --gpu    # also the GPU / image-file steps (occlusion maps,
+                                      # duplicate search, timing)
+python make_paper_numbers.py --from 14   # resume from a given step
 ```
 
 It runs the analysis scripts in order on the cached embeddings and writes every result to

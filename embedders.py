@@ -9,6 +9,8 @@ YOLO-cropped breast, matching the prior MasterNotebooks pipeline.
 
 Add an encoder by registering one zero-arg builder. Output dim is auto-detected.
 """
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -84,6 +86,20 @@ def _build_timm(name, model_id, use_clahe=None):
     size = cfg["input_size"][-1]
     transform = _square_transform(size, cfg["mean"], cfg["std"])
     return Embedder(name, model, transform, use_clahe=use_clahe)
+
+
+def _build_timm_sized(name, model_id, size, use_clahe=False, local_file=None):
+    """timm encoder at a chosen square input size (ViTs via dynamic_img_size), pooled
+    output (CLS/pool as defined by the model), the model's own normalisation."""
+    import timm
+    from timm.data import resolve_data_config
+    kw = {"dynamic_img_size": True} if "vit" in model_id or "eva" in model_id else {}
+    if local_file and os.path.exists(local_file):   # weights fetched by download_weights.sh
+        kw["pretrained_cfg_overlay"] = dict(file=local_file)
+    model = timm.create_model(model_id, pretrained=True, num_classes=0, **kw)
+    cfg = resolve_data_config({}, model=model)
+    return Embedder(name, model, _square_transform(size, cfg["mean"], cfg["std"]),
+                    use_clahe=use_clahe)
 
 
 # --- Hugging Face ViT encoders ----------------------------------------------
@@ -169,11 +185,25 @@ REGISTRY = {
     # mammography-specific foundation model (bespoke grayscale pipeline in mammo_clip.py)
     "mammo_clip_b5":   lambda: __import__("mammo_clip").build("mammo_clip_b5"),
     "mammo_clip_b2":   lambda: __import__("mammo_clip").build("mammo_clip_b2"),
+    "mammo_fm":        lambda: __import__("mammo_clip").build("mammo_fm"),
     # radiology CNNs pretrained on RadImageNet (1.35M radiology images)
     "radimagenet_resnet50":    lambda: __import__("radimagenet").build("radimagenet_resnet50"),
     "radimagenet_densenet121": lambda: __import__("radimagenet").build("radimagenet_densenet121"),
     # mammoscreen internal features (3x EfficientNetV2-S pooled) as an encoder
     "mammoscreen_feat":        lambda: __import__("mammoscreen").MammoscreenFeatEmbedder(),
+    # --- overnight candidate encoders (reviewer R2.2: "why these encoders?") ---
+    "dinov3_vitl16_r512_noclahe": lambda: _build_timm_sized(
+        "dinov3_vitl16_r512_noclahe", "vit_large_patch16_dinov3.lvd1689m", 512,
+        local_file="F:/hf_weights/dinov3_vitl16.safetensors"),
+    "dinov3_vitb16_r512_noclahe": lambda: _build_timm_sized(
+        "dinov3_vitb16_r512_noclahe", "vit_base_patch16_dinov3.lvd1689m", 512,
+        local_file="F:/hf_weights/dinov3_vitb16.safetensors"),
+    "dinov2_vitb14_r518_noclahe": lambda: _dinov2("dinov2_vitb14_r518_noclahe", "dinov2_vitb14", size=518, use_clahe=False),
+    "dinov2_vits14_r518_noclahe": lambda: _dinov2("dinov2_vits14_r518_noclahe", "dinov2_vits14", size=518, use_clahe=False),
+    "convnextv2_base_noclahe": lambda: _build_timm("convnextv2_base_noclahe", "convnextv2_base.fcmae_ft_in22k_in1k", use_clahe=False),
+    "davit_base_noclahe":      lambda: _build_timm("davit_base_noclahe", "davit_base.msft_in1k", use_clahe=False),
+    "vit_base_noclahe":        lambda: _build_timm("vit_base_noclahe", "vit_base_patch16_224.augreg2_in21k_ft_in1k", use_clahe=False),
+    "resnet50_noclahe":        lambda: _build_timm("resnet50_noclahe", "resnet50.a1_in1k", use_clahe=False),
 }
 
 # Encoders that load without any HF gating/token, safe to run out of the box.

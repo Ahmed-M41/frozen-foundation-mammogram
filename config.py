@@ -63,4 +63,9 @@ DEFAULT_HEAD = "tip"
 # five training-derived rules by a training-only inner check (threshold_rules.py).
 DECISION_THRESHOLD = 0.5
 
+# Mini-DDSM patients with any film also present in CBIS-DDSM are removed before splitting
+# (exhaustive pHash + ORB/RANSAC search, duplicate_orb.py; >=15 consistent keypoint matches).
+MINI_EXCLUDE_SHARED_FILMS = True
+MINI_SHARED_MIN_INLIERS = 15
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)

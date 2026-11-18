@@ -23,7 +23,10 @@ plt.rcParams.update({"font.size": 11, "axes.spines.top": False, "axes.spines.rig
                      "figure.dpi": 200})
 
 # BASE4 early-fusion numbers (base4_numbers.py). Nested: NUM[dataset][config].
-NUM = json.load(open(os.path.join(config.PROJECT_DIR, "cache", "base4_numbers.json")))
+# v3 = current protocol (threshold 0.5; Mini-DDSM shared-film patients removed). Only AUCs
+# (threshold-free) are read here; "paired" is the level the paper's tables use.
+NUM = {d: v["paired"] for d, v in json.load(open(os.path.join(
+    config.PROJECT_DIR, "cache", "base4_numbers_v3.json"))).items()}
 METHOD = "base4"          # the paper's method: BASE4 early feature-fusion
 
 # Single representative-seed confusion counts (scanner_confound_check-style honest
@@ -79,8 +82,8 @@ def early_vs_late():
         vals = [NUM[d][cfg]["auc"] for d, _ in datasets]
         sd = [NUM[d][cfg]["std"]["auc"] for d, _ in datasets]
         bars = ax.bar(x + (j-1)*w, vals, w, yerr=sd, capsize=3, color=col, label=lab)
-        for b, v in zip(bars, vals):
-            ax.text(b.get_x()+b.get_width()/2, b.get_height()+0.006, f"{v:.3f}",
+        for b, v, e in zip(bars, vals, sd):      # label sits above the error bar
+            ax.text(b.get_x()+b.get_width()/2, b.get_height()+e+0.004, f"{v:.3f}",
                     ha="center", fontsize=8.5)
     ax.set_xticks(x, [c for _, c in datasets])
     ax.set_ylim(0.75, 1.02)

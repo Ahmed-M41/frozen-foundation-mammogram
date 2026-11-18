@@ -30,6 +30,12 @@ CKPTS = {
 }
 
 
+# Mammo-FM (batmanLab/Mammo-FM): Mammo-CLIP successor, EfficientNet-B5, trained on UPMC, EMBED,
+# BU and Mayo mammograms (no CBIS-DDSM / DDSM); same 1520x912 input and normalisation.
+LOCAL_DIR = "F:/hf_weights/"
+LOCAL = {"mammo_fm": (LOCAL_DIR + "mammofm_clip.tar", "efficientnet-b5")}
+
+
 class MammoClipEmbedder:
     """Interface-compatible with embedders.Embedder (.name/.dim/.embed_batch)."""
 
@@ -38,7 +44,11 @@ class MammoClipEmbedder:
         from efficientnet_pytorch import EfficientNet
         model = EfficientNet.from_name(arch)
         # Trusted official checkpoint stores an omegaconf config -> weights_only=False.
-        ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        if ckpt_path.startswith(LOCAL_DIR):   # downloaded checkpoints: restricted loader
+            import safe_ckpt
+            ck = safe_ckpt.load(ckpt_path)
+        else:
+            ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         raw = ck["model"] if "model" in ck else ck
         weights = {k[len("image_encoder."):]: v for k, v in raw.items()
                    if k.startswith("image_encoder.")}
@@ -90,6 +100,9 @@ def download_ckpt(name):
 
 
 def build(name):
+    if name in LOCAL:
+        path, arch = LOCAL[name]
+        return MammoClipEmbedder(name, path, arch)
     if name not in CKPTS:
         raise KeyError(f"unknown mammo-clip variant {name!r}")
     rel, arch = CKPTS[name]

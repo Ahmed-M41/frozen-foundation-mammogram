@@ -54,7 +54,7 @@ def load_enc(conn, datasets, encoders):
     view = np.array([meta[int(i)]["view"] for i in ids0])
     ds = np.array([meta[int(i)]["dataset"] for i in ids0])
     grp = np.array([meta[int(i)]["patient_id"] for i in ids0])
-    keep = np.isin(view, ["CC", "MLO"])
+    keep = np.isin(view, ["CC", "MLO"]) & M.drop_shared(conn, ds, grp)
     return (np.asarray(ids0)[keep], X[keep], y[keep], split[keep], grp[keep],
             view[keep], ds[keep], patho[keep], abn[keep])
 

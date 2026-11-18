@@ -75,9 +75,31 @@ def _apply_tf(tf, X):
     return pca.transform(Xt) if pca is not None else Xt
 
 
+import os as _os
+N_JOBS = int(_os.environ.get("MV_JOBS", "5"))   # folds fitted in parallel threads; results identical
+
+
+def _fold(Xtr, ytr, Xte, C, trf, vaf):
+    tf, Xf_t = _fit_tf(Xtr[trf])
+    c = LogisticRegression(max_iter=4000, C=C, class_weight="balanced")
+    c.fit(Xf_t, ytr[trf])
+    return vaf, c.predict_proba(_apply_tf(tf, Xtr[vaf]))[:, 1], c.predict_proba(_apply_tf(tf, Xte))[:, 1]
+
+
 def head_cv(Xtr, ytr, ptr, Xte, C, seed=42, n_splits=5):
     """Return (oof scores on train images, ensemble scores on test images)."""
+    if FROFA == 0 and PCA_DIM == 0 and _os.environ.get("MV_GPU") == "1":   # exploratory GPU solver
+        import gpu_logreg
+        return gpu_logreg.head_cv(Xtr, ytr, ptr, Xte, C, seed, n_splits)
     sg = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    if FROFA == 0 and N_JOBS > 1:        # each fold is independent: parallel fit, same numbers
+        from joblib import Parallel, delayed
+        res = Parallel(n_jobs=N_JOBS, prefer="threads")(
+            delayed(_fold)(Xtr, ytr, Xte, C, trf, vaf) for trf, vaf in sg.split(Xtr, ytr, groups=ptr))
+        oof = np.zeros(len(Xtr))
+        for vaf, o, _ in res:
+            oof[vaf] = o
+        return oof, np.mean([t for *_, t in res], axis=0)
     oof, tep = np.zeros(len(Xtr)), []
     rng = np.random.default_rng(seed)
     for trf, vaf in sg.split(Xtr, ytr, groups=ptr):

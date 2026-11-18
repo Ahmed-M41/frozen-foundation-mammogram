@@ -11,3 +11,7 @@ paper_ieee_access/
 ENSEMBLER_B.md
 *.zip
 *.zip.bak
+*.db.bak*
+
+# Revision tracker (contains confidential reviewer comments)
+IEEE_Access_revision_tracker.xlsx

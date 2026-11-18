@@ -78,9 +78,35 @@ def load_base(conn, datasets):
     view = np.array([meta[int(i)]["view"] for i in ids0])
     ds = np.array([meta[int(i)]["dataset"] for i in ids0])
     grp = np.array([meta[int(i)]["patient_id"] for i in ids0])
-    keep = np.isin(view, ["CC", "MLO"])
+    keep = np.isin(view, ["CC", "MLO"]) & drop_shared(conn, ds, grp)
     return (np.asarray(ids0)[keep], X[keep], y[keep], split[keep], grp[keep],
             view[keep], ds[keep], patho[keep], abn[keep])
+
+
+_SHARED = {}
+
+
+def shared_film_patients(conn):
+    """Mini-DDSM patient ids with a film shared with CBIS-DDSM (empty if the switch is off)."""
+    if not config.MINI_EXCLUDE_SHARED_FILMS:
+        return set()
+    thr = config.MINI_SHARED_MIN_INLIERS
+    if thr not in _SHARED:
+        import json, os
+        pairs = json.load(open(os.path.join(config.PROJECT_DIR, "cache", "duplicate_orb.json")))["pairs"]
+        files = {r["mini"] for r in pairs if r["inliers"] >= thr}
+        rows = conn.execute("SELECT file_name, patient_id FROM samples "
+                            "WHERE dataset IN ('miniddsm','miniddsm_normal')")
+        _SHARED[thr] = {r["patient_id"] for r in rows if r["file_name"] in files}
+    return _SHARED[thr]
+
+
+def drop_shared(conn, ds, grp):
+    """Row mask: False for Mini-DDSM rows of patients with a film shared with CBIS-DDSM."""
+    mini = np.isin(ds, ["miniddsm", "miniddsm_normal"])
+    if not mini.any():
+        return np.ones(len(ds), bool)
+    return ~(mini & np.isin(grp, list(shared_film_patients(conn))))
 
 
 def apply_task(task, ids, X, y, split, grp, view, ds, patho, abn, abn_filter=None):

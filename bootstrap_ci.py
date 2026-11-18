@@ -42,12 +42,23 @@ def _point(y, s):
                 f1=2 * tp / (2 * tp + fp + fn) if tp else 0.0)
 
 
-def ci(y, s):
+def ci(y, s, groups=None):
+    """Bootstrap CI. groups: case id per row when rows are pooled over seeds whose test
+    partitions overlap; the case is then the resampling unit (all its rows together)."""
     rng = np.random.default_rng(RNG_SEED)
     est = _point(y, s)
     reps = {k: [] for k in est}
+    members = None
+    if groups is not None:
+        g = [str(x).split(":", 1)[-1] for x in groups]
+        uniq, inv = np.unique(g, return_inverse=True)
+        if len(uniq) < len(g):
+            members = [np.flatnonzero(inv == k) for k in range(len(uniq))]
     while len(reps["auc"]) < B:
-        i = rng.integers(0, len(y), len(y))
+        if members is None:
+            i = rng.integers(0, len(y), len(y))
+        else:
+            i = np.concatenate([members[k] for k in rng.integers(0, len(members), len(members))])
         if len(np.unique(y[i])) < 2:
             continue
         for k, v in _point(y[i], s[i]).items():
@@ -72,7 +83,8 @@ def scores(conn, datasets, split_fn, ms_map, apply_nc, enc, seeds):
         tr, te = split_fn(seed, split, grp, y)
         cf_tr, cf_te = head_case_scores(conn, ids, X, y, grp, view, tr, te, M.C_HEAD, seed)
         _, _, _, yp, sp, _ = align_B(cf_tr, cf_te, ms_map, ms_map)
-        out.append((np.array(cf_te["y_true"]), np.array(cf_te["y_score"]), yp, sp))
+        out.append((np.array(cf_te["y_true"]), np.array(cf_te["y_score"]), yp, sp,
+                    np.array([str(c) for c in cf_te["cids"]])))
     return out
 
 
@@ -90,7 +102,8 @@ def main():
     mini = scores(conn, ["miniddsm", "miniddsm_normal"], mini_split,
                   M.load_ms(["miniddsm", "miniddsm_normal"]), True, BASE3 + [MSFEAT], SEEDS)
     res["mini_pooled_mammoff"] = ci(np.concatenate([m[0] for m in mini]),
-                                    np.concatenate([m[1] for m in mini]))
+                                    np.concatenate([m[1] for m in mini]),
+                                    np.concatenate([m[4] for m in mini]))   # case-level
     out = {}
     for name, (d, n) in res.items():
         out[name] = dict(n=n, **d)
